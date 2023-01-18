@@ -1,22 +1,28 @@
 package hexlet.code.controllers;
 
+import hexlet.code.domain.UrlCheck;
 import hexlet.code.domain.Url;
-import hexlet.code.domain.query.QUrl;
-import io.javalin.http.Handler;
-import io.javalin.http.NotFoundResponse;
+import hexlet.code.domain.query.QUrlCheck;
 import io.ebean.PagedList;
+import io.javalin.http.Handler;
+
+import hexlet.code.domain.query.QUrl;
+import io.javalin.http.NotFoundResponse;
+
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.util.List;
-import java.util.stream.IntStream;
-import java.util.stream.Collectors;
 
 
-public final class UrlController {
+public class UrlController {
+
     public static Handler listUrls = ctx -> {
-        int page = ctx.queryParamAsClass("page", Integer.class).getOrDefault(1) - 1;
-        int rowsPerPage = 10;
+        int page = ctx.queryParamAsClass("page", Integer.class).getOrDefault(1);
+        final int rowsPerPage = 10;
+        int offset = (page - 1) * rowsPerPage;
 
         PagedList<Url> pagedUrls = new QUrl()
-                .setFirstRow(page * rowsPerPage)
+                .setFirstRow(offset)
                 .setMaxRows(rowsPerPage)
                 .orderBy()
                 .id.asc()
@@ -24,21 +30,53 @@ public final class UrlController {
 
         List<Url> urls = pagedUrls.getList();
 
-        int lastPage = pagedUrls.getTotalPageCount() + 1;
-        int currentPage = pagedUrls.getPageIndex() + 1;
-        List<Integer> pages = IntStream
-                .range(1, lastPage)
-                .boxed()
-                .collect(Collectors.toList());
+        ctx.attribute("urls", urls);
+        ctx.attribute("page", page);
+        ctx.render("urls/index.html");
+    };
 
-//        ctx.attribute("urls", urls);
-//        ctx.attribute("pages", pages);
-//        ctx.attribute("currentPage", currentPage);
+    public static Handler createUrl = ctx -> {
+        String urlToString = ctx.formParam("url");
+        URL urlObject;
 
-        ctx.render("main.html");
+        try {
+            urlObject = new URL(urlToString);
+        } catch (MalformedURLException mue) {
+            ctx.status(422);
+            ctx.sessionAttribute("flash", "Incorrect URL");
+            ctx.sessionAttribute("flash-type", "danger");
+            ctx.redirect("/");
+            return;
+        }
+
+        Url duplicateUrl = new QUrl()
+                .name.equalTo(urlToString)
+                .findOne();
+
+        if (duplicateUrl != null) {
+            ctx.status(422);
+            ctx.sessionAttribute("flash", "The page already exists");
+            ctx.sessionAttribute("flash-type", "danger");
+            ctx.redirect("/urls");
+            return;
+        }
+
+        String protocol = urlObject.getProtocol();
+        String domain = urlObject.getAuthority();
+
+        String urlToSave = protocol + "://" + domain;
+
+        Url url = new Url(urlToSave);
+        url.save();
+
+        ctx.sessionAttribute("flash", "Страница успешно добавлена");
+        ctx.sessionAttribute("flash-type", "success");
+        ctx.redirect("/urls");
     };
 
     public static Handler showUrl = ctx -> {
+        System.out.println(ctx.fullUrl());
+        System.out.println(ctx.url());
         int id = ctx.pathParamAsClass("id", Integer.class).getOrDefault(null);
 
         Url url = new QUrl()
@@ -49,37 +87,14 @@ public final class UrlController {
             throw new NotFoundResponse();
         }
 
+        List<UrlCheck> urlChecks = new QUrlCheck()
+                .url.equalTo(url)
+                .orderBy().id.desc()
+                .findList();
+
+        ctx.attribute("urlChecks", urlChecks);
+
         ctx.attribute("url", url);
-        ctx.render("showUrl.html");
+        ctx.render("urls/show.html");
     };
-
-    public static Handler createUrl = ctx -> {
-        String name = ctx.formParam("url");
-
-        if (name.isEmpty()) {
-            ctx.sessionAttribute("flash", "Некорректный URL");
-            ctx.sessionAttribute("flash-type", "danger");
-            ctx.attribute("url", name);
-            ctx.render("main.html");
-            return;
-        }
-
-        Url url = new QUrl()
-                .name.equalTo(name)
-                .findOne();
-        if (url != null) {
-            ctx.sessionAttribute("flash", "Страница уже существует");
-            ctx.sessionAttribute("flash-type", "danger");
-            ctx.attribute("url", name);
-            ctx.render("main.html");
-            return;
-        }
-
-        Url newUrl = new Url(name);
-        newUrl.save();
-        ctx.sessionAttribute("flash", "Страница успешно добавлена");
-        ctx.sessionAttribute("flash-type", "success");
-        ctx.redirect("/urls");
-    };
-
 }
